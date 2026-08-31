@@ -43,6 +43,12 @@ jobs:
           Expand-Archive -Path $zipPath -DestinationPath $extract -Force
 
           Get-ChildItem -Force $extract | Copy-Item -Destination . -Recurse -Force
+
+          # GitHub Actions GITHUB_TOKEN cannot create/update workflow files.
+          # The verified build workflow is added to main separately after this PR is merged.
+          if (Test-Path ".github/workflows/build-windows.yml") {
+            Remove-Item ".github/workflows/build-windows.yml" -Force
+          }
           Remove-Item "_bootstrap" -Recurse -Force
 
       - name: Validate imported files
@@ -51,7 +57,6 @@ jobs:
           if (-not (Test-Path "certificate_maker.py")) { throw "certificate_maker.py missing" }
           if (-not (Test-Path "samples/template.pptx")) { throw "samples/template.pptx missing" }
           if (-not (Test-Path "samples/data.xlsx")) { throw "samples/data.xlsx missing" }
-          if (-not (Test-Path ".github/workflows/build-windows.yml")) { throw "build-windows.yml missing" }
 
           python -m py_compile certificate_maker.py
 
