@@ -1,0 +1,84 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate source
+        shell: powershell
+        run: |
+          python -m py_compile certificate_maker.py
+          if (Select-String -Path certificate_maker.py -Pattern '^import zipfile|from openpyxl|load_workbook' -Quiet) {
+            throw 'Legacy ZIP/openpyxl runtime path detected'
+          }
+          if (Select-String -Path certificate_maker.py -Pattern 'presentation\.SaveAs\(' -Quiet) {
+            throw 'Legacy Presentation.SaveAs call detected'
+          }
+          if (-not (Select-String -Path certificate_maker.py -Pattern 'ExportAsFixedFormat' -Quiet)) {
+            throw 'PDF ExportAsFixedFormat path missing'
+          }
+          if (-not (Select-String -Path certificate_maker.py -Pattern 'SaveCopyAs' -Quiet)) {
+            throw 'PPTX SaveCopyAs path missing'
+          }
+          if (-not (Select-String -Path certificate_maker.py -Pattern 'PP_WINDOW_MINIMIZED' -Quiet)) {
+            throw 'PowerPoint minimized background mode missing'
+          }
+          if (-not (Test-Path 'samples\template.pptx')) { throw 'template.pptx missing' }
+          if (-not (Test-Path 'samples\data.xlsx')) { throw 'data.xlsx missing' }
+
+      - name: Build EXE
+        shell: powershell
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed `
+            --name CertificateMaker `
+            --hidden-import pythoncom `
+            --hidden-import pywintypes `
+            --hidden-import win32timezone `
+            --hidden-import win32com.client `
+            --hidden-import win32com.client.dynamic `
+            --hidden-import win32com.client.gencache `
+            --collect-submodules win32com `
+            --add-data 'samples;samples' `
+            certificate_maker.py
+          if (-not (Test-Path 'dist\CertificateMaker.exe')) { throw 'EXE was not created' }
+
+      - name: Write SHA256
+        shell: powershell
+        run: |
+          (Get-FileHash 'dist\CertificateMaker.exe' -Algorithm SHA256).Hash.ToLowerInvariant() | Out-File 'dist\CertificateMaker.exe.sha256' -Encoding ascii
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CertificateMaker-Windows-x64
+          path: |
+            dist/CertificateMaker.exe
+            dist/CertificateMaker.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
